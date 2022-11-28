@@ -3,26 +3,19 @@ title: "QM 2022 Week 13: Wrap Up"
 author: "Oliver Rittmann & Domantas Undzėnas  & Lion Behrens"
 date: "November 30 | December 1 | December 2, 2022"
 output:
-  html_document: 
+  html_document:
     toc: yes
     number_sections: yes
     toc_float: yes
     highlight: tango
     css: css/lab.css
-    keep_md: yes
-    code_folding: show
-    fig_width: 8
-    fig_height: 4
-    fig_caption: yes
+    self_contained: yes
   pdf_document:
     toc: yes
-    keep_md: yes
-header-includes:
-- \usepackage{dcolumn}
 bibliography: citations.bib # this adds a bibliography file from the repo
 biblio-style: apsr # this selects the style 
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
   markdown: 
     wrap: sentence
 ---
@@ -31,8 +24,8 @@ editor_options:
 
 Today:
 
-1.  Simulation, Simulation... Visualizing Interaction Effects in non-linear models
-2.  Simulation, Simulation... A range of values in a count model
+1.  Generalized Linear Models and Statistical Simulation
+2.  Simulation, Simulation... Visualizing Interaction Effects in non-linear models
 3.  Robustness checks
 4.  Formatting and RMarkdown (Revision)
 
@@ -111,12 +104,205 @@ set.seed(2022)
 ```
 
 
+# The Relationship Between Generalized Linear Models and Statistical Simulation
 
-# 1. Simulation, Simulation... Visualizing Interaction Effects in non-linear models
+We have worked with different GLMs in the second part of the course and as a review, you can find all the main information about them in the table below.
+
+A model that is part of the generalized linear model family is defined by (i) a stochastic component, (ii) a systematic component, and (iii) a link function. As you can see, the models merely differ by their *stochastic components* and *link functions*.
+
+
++-------------------+-----------------------------------+-----------------------+-------------------------------------+-----------------------------------------------------+
+| Model             | Stochastic Component              | Systematic Component: | Systematic Component:               | Inverse Link Function                               |
+|                   |                                   |                       |                                     |                                                     |
+|                   |                                   | Linear Predictor      | Link Function                       | (Response function)                                 |
++===================+===================================+=======================+=====================================+=====================================================+
+| Linear            | $$                                | $$                    | $$                                  | $$                                                  |
+|                   | Y \sim \mathcal{N(\mu_i, \sigma)} | \mu_i = X_i\beta      | \mu_i                               | \mu_i                                               |
+|                   | $$                                | $$                    | $$                                  | $$                                                  |
+|                   |                                   |                       |                                     |                                                     |
+|                   | `rnorm()`                         |                       |                                     |                                                     |
++-------------------+-----------------------------------+-----------------------+-------------------------------------+-----------------------------------------------------+
+| Logit             | $$                                | $$                    | $$                                  | $$                                                  |
+|                   | Y \sim Bernoulli (\pi_i)          | \mu_i = X_i\beta      | \mu_i = \log\frac{\pi_i}{1 - \pi_i} | \pi_i = \dfrac{{\exp(\mu_i)}^{}}{{1 + \exp(\mu_i)}} |
+|                   | $$                                | $$                    | $$                                  | $$                                                  |
+|                   |                                   |                       |                                     |                                                     |
+|                   | `rbinom(size = 1)`                |                       |                                     | `plogis()`                                          |
++-------------------+-----------------------------------+-----------------------+-------------------------------------+-----------------------------------------------------+
+| Probit            | $$                                | $$\mu_i = X_i\beta    | $$                                  | $$                                                  |
+|                   | Y \sim Bernoulli (\pi_i)          | $$                    | \mu_i = \Phi^{-1}({\pi_i})          | \pi_i = \Phi({\mu_i})                               |
+|                   | $$                                |                       | $$                                  | $$                                                  |
+|                   |                                   |                       |                                     |                                                     |
+|                   | `rbinom(size = 1)`                |                       |                                     | `pnorm()`                                           |
++-------------------+-----------------------------------+-----------------------+-------------------------------------+-----------------------------------------------------+
+| Poisson           | $$                                | $$                    | $$                                  | $$                                                  |
+|                   | Y \sim Pois (\lambda_i)           | \mu_i = X_i\beta      | \mu_i= \log{\lambda_i}              | \lambda_i = e^{\mu_i}                               |
+|                   | $$                                | $$                    | $$                                  | $$                                                  |
+|                   |                                   |                       |                                     |                                                     |
+|                   | `rpois()`                         |                       |                                     | `exp()`                                             |
++-------------------+-----------------------------------+-----------------------+-------------------------------------+-----------------------------------------------------+
+| Negative Binomial | $$                                | $$                    | $$                                  | $$                                                  |
+|                   | Y \sim NegBin(\lambda_i, \theta)  | \mu_i = X_i\beta      | \mu_i= \log{\lambda_i}              | \lambda_i = e^{\mu_i}                               |
+|                   | $$                                | $$                    | $$                                  | $$                                                  |
+|                   |                                   |                       |                                     |                                                     |
+|                   | `rnbinom()`                       |                       |                                     | `exp()`                                             |
++-------------------+-----------------------------------+-----------------------+-------------------------------------+-----------------------------------------------------+
+
+: Note: $\Phi(.)$ is the cumulative distribution function of the standard normal distribution.
+
+We have discussed that both estimation uncertainty and fundamental uncertainty can be incorporated into the simulated quantities of interest from our statistical models. Throughout the semester, we have simulated expected values (incorporating estimation uncertainty) and predicted values (incorporating estimation *and* fundamental uncertainty) for a whole range of different model types. 
+Note that the table above might seriously help you when you are simulating quantities of interest from your statistical models (for instance in the data essay). 
+
+In particular, we need to select the appropriate response function when transforming the linear predictor `mu` when working with the expected values and, when generating predicted values, to draw from the appropriate stochastic component.
+
+Once you understand how a GLM is defined, you know what to do when you are tackling statistical simulation...
+
+## Generalized Linear Models and Data Generation
+
+How to generate artificial data based on different GLMs? Let's start out with some data for a continuous, binary, and count response variable. 
+
+```{r}
+# Define population size
+N <- 10000
+
+# Define true parameter values
+beta0 <- 1 
+beta1 <- 0.5
+beta2 <- -1.1 
+
+# Define some data
+X1 <- rnorm(N, mean = 0, sd =1)
+X2 <- runif(N)
+```
+
+The systematic component always takes on the same form. 
+
+```{r}
+# Linear Predictor
+mu <- beta0 + beta1 * X1 + beta2 * X2 
+```
+
+Let's generate different response variable types from this linear predictor $\mu$.
+
+* 1. Plug $\mu$ into the response function of the GLM that describes your data generating process (inverse link function)
+* 2. Sample from the stochastic component
+
+**Hint:** Look at the table above!
+
+```{r}
+# Continuous dependent variable
+y_continuous <- mu + rnorm(N, mean = 0, sd = 3)
+
+# Binary dependent variable
+p <- exp(mu) / (1 + exp(mu))
+y_binary <- rbinom(N, 1, p)
+
+# Count dependent variable
+lambda <- exp(mu)
+theta <- 0.385
+y_count <- rnbinom(N, size = theta, mu = lambda)
+```
+
+## Generalized Linear Models and the Simulation Method
+
+The table above will also help you when you simulate from your statistical models and construct substantive quantities of interest. 
+
+Simply simulate from your model, identify the response function (inverse link function) that describes your statistical model family, and construct expected values. If you care about predictions, additionally sample from the relevant stochastic component. 
+
+* 1. Simulate estimation uncertainty of parameters $S$. *(same for all models)*
+* 2. Construct the linear predictor $\mu$. *(same for all models)*
+* 3. Plug $\mu$ into the response function of the GLM that describes your data generating process *(check the table above)*
+* 4. Sample from the stochastic component *(check the table above)*
+
+```{r, warning = F, message = F}
+# Sample from our population, n=1,000
+set.seed(2022)
+ids <- sample(1:N, 1000)
+data <- as.data.frame(
+  cbind(
+    y_continuous = y_continuous[ids], 
+    y_binary = y_binary[ids], 
+    y_count = y_count[ids],
+    X1 = X1[ids],
+    X2 = X2[ids]
+  )
+)
+
+# Set up statistical models
+m1 <- glm(y_continuous ~ X1 + X2, data, 
+          family = gaussian(link = "identity")) # linear regression
+
+m2 <- glm(y_binary ~ X1 + X2, data, 
+          family =  binomial(link = "logit")) # logistic regression
+
+m3 <- glm.nb(y_count ~ X1 + X2, data) # negative binomial regression
+
+# Construct scenarios to evaluate
+scenario <- rbind(
+  1, # intercept
+  1, # X1
+  seq(min(data$X2), max(data$X2), length=100) # X2
+)
+
+# Function to simulate estimation uncertainty of parameters
+construct_S <- function(model) {
+  nsim <- 1000
+  beta_hat <- coef(model)
+  Sigma <- vcov(model)
+  S <- mvrnorm(nsim, beta_hat, Sigma)
+  return(S)
+  }
+```
+
+Expected and predicted values for **linear regression** (check the table above!): 
+
+```{r}
+# Construct linear predictor
+mu1 <- construct_S(m1) %*% scenario 
+
+# Apply response function to get expected values
+EV_linear <- mu1 # link = identity link
+
+# Sample from stochastic component to get predicted values
+sigma_est <- sqrt(sum(residuals(m1)^2) / (nrow(data) - length(m1$coefficients)))
+PV_linear <- rnorm(EV_linear, mean = 0, sd = sigma_est) 
+```
+
+Expected and predicted values for **logistic regression** (check the table above!): 
+
+```{r}
+# Construct linear predictor
+mu2 <- construct_S(m2) %*% scenario 
+
+# Apply response function to get expected values
+EV_logistic <- (exp(mu2))/ (1 + exp(mu2)) # link = logistic link
+
+# Sample from stochastic component to get predicted values
+PV_logistic <- rbinom(length(EV_logistic), size = 1, p = EV_logistic)
+```
+
+Expected and predicted values for **negative binomial regression** (check the table above!): 
+
+```{r}
+# Construct linear predictor
+mu3 <- construct_S(m3) %*% scenario 
+
+# Apply response function to get expected values
+EV_count <- exp(mu3) # link = log link
+
+# Sample from stochastic component to get predicted values
+theta <- m3$theta
+PV_count <- rnbinom(length(EV_count), size = theta, mu = lambda)
+```
+
+
+
+# Simulation, Simulation... Visualizing Interaction Effects in Non-Linear Models
+
+## Logistic Regression
 
 Unfortunately, the intuition about interaction terms form linear models does not extend to non-linear models.
 
-However, we have one really powerful tool in our toolbox that can help us to look at and interpret interactions in any model. Simulation!
+However, using statistical simulation, it is straightforward to look at and interpret interactions in any model. 
 
 As some of you had problems with the interaction effect in a logit model in Homework 9, we will look at an interaction in a logit model here.
 
@@ -175,11 +361,9 @@ m1 <-
 summary(m1)
 ```
 
-So now we can't make sense of these coefficients... 
+So now we can't make sense of these coefficients... To see what those coefficients mean, we use simulation.
 
-# To see what those coefficients mean, we use simulation.
-
-## A. Simulate Parameters - Remember the Steps?
+### Simulate Parameters - Remember the Steps?
 
 Steps for Simulating Parameters:
 
@@ -196,7 +380,7 @@ S <- mvrnorm(1000, gamma_hat, V_hat)
 ```
 
 
-## B. Calculate Expected Values
+### Calculate Expected Values
 
 Set up interesting scenarios. That's the important step here!
 
@@ -232,9 +416,11 @@ p_qu_lo <- t(apply(p_sim_lo, 2, quantile, prob = c(0.025, 0.975)))
 
 p_mean_hi <- apply(p_sim_hi, 2, mean)
 p_qu_hi <- t(apply(p_sim_hi, 2, quantile, prob = c(0.025, 0.975)))
+```
 
-## C. Plot
+### Plot
 
+```{r}
 plot(
   X1_sim,
   p_mean_lo,
@@ -328,7 +514,7 @@ axis(
 
 That looks funky (and not linear at all...).
 
-# 2. Simulation, Simulation... A range of values in a count model
+## Negative Binomial Regression
 
 Let's simulate some more. We take another look at the data last week. We make our model 2 from last week slightly more interesting, by adding an interaction between regime type and the number of prior one-sided killings.
 
@@ -348,7 +534,7 @@ summary(m2)
 ```
 
 
-## A. Simulate Parameters - Remember the Steps?
+### Simulate Parameters - Remember the Steps?
 
 Steps for Simulating Parameters (Estimation Uncertainty)
 1. Get the coefficients from the regression (gamma.hat)
@@ -368,7 +554,7 @@ S <- mvrnorm(nsim, gamma_hat, V_hat)
 ```
 
 
-## B. Calculate Expected Values
+### Calculate Expected Values
 
 Set up interesting scenarios.
 
@@ -480,7 +666,7 @@ median_ano <- apply(exp_ano, 2, median)
 quants_ano <- t(apply(exp_ano, 2, quantile, c(0.025, 0.975)))
 ```
 
-Plot it.
+### Plot
 
 ```{r}
 plot(
