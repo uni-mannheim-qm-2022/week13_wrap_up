@@ -536,289 +536,6 @@ legend("topleft",
        bty = "n")
 ```
 
-How about looking at the first difference of the two scenarios directly?
-
-```{r}
-fd <- p_sim_lo - p_sim_hi
-
-fd_mean <- apply(fd, 2, mean)
-
-fd_qu <- t(apply(fd, 2, quantile, prob = c(0.025, 0.975)))
-
-
-
-plot(
-  X1_sim,
-  fd_mean,
-  type = "n",
-  ylim = c(-1, 1),
-  ylab = "Difference in predicted probabilities",
-  xlab = "X1",
-  bty = "n",
-  las = 1
-)
-
-polygon(
-  c(rev(X1_sim), X1_sim),
-  c(rev(fd_qu[, 2]), fd_qu[, 1]),
-  col = viridis(1, 0.5),
-  border = NA
-)
-
-abline(h = 0)
-lines(X1_sim, fd_mean, lwd = 1)
-
-
-axis(
-  1,
-  at = X1,
-  col.ticks = "gray30",
-  labels = FALSE,
-  tck = 0.02
-) 
-```
-
-That looks funky (and not linear at all...).
-
-## Negative Binomial Regression
-
-Let's simulate some more. We take another look at the data last week. We make our model 2 from last week slightly more interesting, by adding an interaction between regime type and the number of prior one-sided killings.
-
-```{r}
-dta <- read.dta("eck_rep.dta")
-#  Some data preparation
-
-dta$os_best[dta$os_best == 500000] <- NA # Rwanda
-
-m2 <-
-  glm.nb(
-    os_best ~ intensity_dyad + auto + demo + govt + prior_os*auto + prior_os*demo,
-    data = dta,
-    control = glm.control(maxit = 200)
-  )
-summary(m2)
-```
-
-
-### Simulate Parameters - Remember the Steps?
-
-Steps for Simulating Parameters (Estimation Uncertainty)
-1. Get the coefficients from the regression (gamma.hat)
-2. Get the variance-covariance matrix (V.hat)
-3. Set up a multivariate normal distribution N(gamma.hat,V.hat)
-4. Draw from the distribution nsim times
-
-
-```{r}
-nsim <- 1000
-
-gamma_hat <- coef(m2)
-
-V_hat <- vcov(m2)
-
-S <- mvrnorm(nsim, gamma_hat, V_hat)
-```
-
-
-### Calculate Expected Values
-
-Set up interesting scenarios.
-
-Autocracies
-
-```{r}
-coef(m2)
-prior_os_seq <-
-  round(seq(min(dta$prior_os, na.rm = TRUE),
-      quantile(dta$prior_os, 0.95, na.rm = T),
-      length.out = 100), 0)
-
-scenario1 <-
-  cbind(
-    1,
-    median(dta$intensity_dyad, na.rm = TRUE),
-    1,
-    0,
-    median(dta$govt, na.rm = TRUE),
-    prior_os_seq,
-    prior_os_seq,
-    0
-  ) 
-```
-
-
-Democracies
-
-```{r}
-scenario2 <- cbind(
-  1,
-  median(dta$intensity_dyad, na.rm = TRUE),
-  0,
-  1,
-  median(dta$govt, na.rm = TRUE),
-  prior_os_seq,
-  0,
-  prior_os_seq
-)
-```
-
-
-Anocracies
-
-```{r}
-scenario3 <- cbind(
-  1,
-  median(dta$intensity_dyad, na.rm = TRUE),
-  0,
-  0,
-  median(dta$govt, na.rm = TRUE),
-  prior_os_seq,
-  0,
-  0
-) 
-```
-
-
-```{r}
-Xbeta1 <- S %*% t(scenario1)
-
-Xbeta2 <- S %*% t(scenario2)
-
-Xbeta3 <- S %*% t(scenario3)
-```
-
-
-To get expected values for lambda, we need to plug in the Xbeta values into the response function 
-
-```{r}
-lambda1 <- exp(Xbeta1)
-
-lambda2 <- exp(Xbeta2)
-
-lambda3 <- exp(Xbeta3)
-```
-
-Now we need an additional step: Plug the lambda and theta into the negative binomial distribution. And then we average over the fundamental uncertainty for expected values. Please have a look at the King et al. 2001 article from Week 7 again for further information. 
-
-Get the theta.
-
-```{r}
-theta <- m2$theta
-
-exp_auto <-
-  matrix(sapply(lambda1, function(x)
-    mean(rnbinom(1000, size = theta, mu = x))), nrow = 1000)
-
-exp_demo <-
-  matrix(sapply(lambda2, function(x)
-    mean(rnbinom(1000, size = theta, mu = x))), nrow = 1000)
-
-exp_ano <-
-  matrix(sapply(lambda3, function(x)
-    mean(rnbinom(1000, size = theta, mu = x))), nrow = 1000)
-```
-
-
-Summarize the results.
-
-```{r}
-median_auto <- apply(exp_auto, 2, median)
-quants_auto <- t(apply(exp_auto, 2, quantile, c(0.025, 0.975)))
-
-median_demo <- apply(exp_demo, 2, median)
-quants_demo <- t(apply(exp_demo, 2, quantile, c(0.025, 0.975)))
-
-median_ano <- apply(exp_ano, 2, median)
-quants_ano <- t(apply(exp_ano, 2, quantile, c(0.025, 0.975)))
-```
-
-### Plot
-
-```{r}
-plot(
-  prior_os_seq,
-  median_auto,
-  type = "n",
-  ylim = c(0, 1000),
-  ylab = "Expected Number of one-sided Killings",
-  xlab = "Prior one-sided Killings",
-  bty = "n",
-  las = 1
-)
-
-polygon(
-  c(rev(prior_os_seq), prior_os_seq),
-  c(rev(quants_auto[, 2]), quants_auto[, 1]),
-  col = adjustcolor("lightblue", alpha = 0.2),
-  border = NA
-)
-
-polygon(
-  c(rev(prior_os_seq), prior_os_seq),
-  c(rev(quants_demo[, 2]), quants_demo[, 1]),
-  col = adjustcolor("lightgray", alpha = 0.2),
-  border = NA
-)
-
-polygon(
-  c(rev(prior_os_seq), prior_os_seq),
-  c(rev(quants_ano[, 2]), quants_ano[, 1]),
-  col = adjustcolor("maroon3", alpha = 0.2),
-  border = NA
-)
-
-lines(prior_os_seq, median_auto, lwd = 2)
-lines(prior_os_seq, quants_auto[, 1], lwd = 0.5, lty = "dashed", col = "lightblue")
-lines(prior_os_seq, quants_auto[, 2], lwd = 0.5, lty = "dashed", col = "lightblue")
-
-lines(prior_os_seq, median_demo, lwd = 2, lty = "dotted")
-lines(prior_os_seq, quants_demo[, 1], lwd = 0.5, lty = "dashed", col = "lightgray")
-lines(prior_os_seq, quants_demo[, 2], lwd = 0.5, lty = "dashed", col = "lightgray")
-
-
-lines(prior_os_seq, median_ano, lwd = 2, lty = "dashed")
-lines(prior_os_seq, quants_ano[, 1], lty = "dashed", col = "maroon3")
-lines(prior_os_seq, quants_ano[, 2], lty = "dashed", col = "maroon3")
-
-
-# Add a "histogram" of actual X1-values.
-
-axis(
-  1,
-  at = dta$prior_os,
-  col.ticks = "gray30",
-  labels = FALSE,
-  tck = 0.02
-) 
-
-legend(
-  "topleft",
-  legend = c(
-    "Autocracy - median",
-    "Autocracy - 95% CI",
-    "Democracy - median",
-    "Democracy - 95% CI",
-    "Anocracy - median",
-    "Anocracy - 95% CI"
-  ),
-  col = c(
-    "black",
-    adjustcolor("lightblue", alpha = 0.5),
-    "black",
-    adjustcolor("lightgray", alpha = 0.5),
-    "black",
-     adjustcolor("maroon3", alpha = 0.5)
-  ),
-  lty = c("solid", NA, "dotted", NA, "dashed", NA),
-  lwd = c(2, NA, 2, NA, 2, NA),
-  pch = c(NA, 15, NA, 15, NA, 15),
-  pt.cex = 2,
-  bty = "n"
-)
-```
-
-
-
 # Robustness Checks
 
 > "All models are wrong, but some are useful." -- George Box
@@ -836,14 +553,34 @@ Robustness tests can increase the validity of inferences.
 
 A very common test is *outlier elimination*, where one essentially drops the outliers.
 Keep in mind, however, that if the model is strongly misspecified, outlier tests are more likely to pick up the consequences of model misspecification than to detect true outliers (cases that are not part of the population), thereby making bias potentially worse.
-We can try implementing this test for our model from before.
+We can try implementing this test for our model from last week.
+
+```{r}
+dta <- read.dta("eck_rep.dta")
+#  Some data preparation
+
+dta$os_best[dta$os_best == 500000] <- NA # Rwanda
+
+m2 <-
+  glm.nb(
+    os_best ~ intensity_dyad + auto + demo + govt + prior_os,
+    data = dta,
+    control = glm.control(maxit = 200)
+  )
+summary(m2)
+```
+
 Following the approach in [@hilbe2009], we'll treat observations with so-called standardized deviance residuals (a generalization of $\hat\epsilon_i$ for GLMs) greater than 2 as potential outliers.
 
 ```{r basic-model, collapse=FALSE}
 summary(m2)
 # remove outliers 
-m3 <- glm.nb(formula = os_best ~ intensity_dyad + auto + demo + govt + 
-    prior_os, data = m2$model[!rstandard(m2) > 2,], control = glm.control(maxit = 200), 
+m3 <- 
+  glm.nb(
+    os_best ~ intensity_dyad + auto + demo + govt + prior_os, 
+    # exclude outliers
+    data = m2$model[!rstandard(m2) > 2,], 
+    control = glm.control(maxit = 200), 
     )
 summary(m3)
 ```
